@@ -209,7 +209,9 @@ def generate_nonanomalous_data(csv_data_dir):
                     set_anomaly_column_none(os.path.join(root, file))
 
 
-generate_anomalous_data("csvMidiData", "masterChanges.csv")
+# generate_anomalous_data("csvMidiData", "masterChanges.csv")
 
 
 # generate_nonanomalous_data("csvMidiData")
+
+getMidiDF("36693.mid")
