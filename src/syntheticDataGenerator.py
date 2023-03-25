@@ -214,4 +214,4 @@ def generate_nonanomalous_data(csv_data_dir):
 
 # generate_nonanomalous_data("csvMidiData")
 
-getMidiDF("36693.mid")
+# getMidiDF("36693.mid")

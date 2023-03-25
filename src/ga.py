@@ -1,84 +1,106 @@
+import pandas as pd
 import numpy as np
 import random
-from main import predict_anomalies
+from copy import deepcopy
+from tensorflow.keras.models import load_model
 
-POPULATION_SIZE = 100
-GENERATIONS = 500
-MUTATION_RATE = 0.1
-ELITISM_RATE = 0.1
+from sklearn.preprocessing import MinMaxScaler
 
-SEQUENCE_LENGTH = 10  # The same sequence length used when training the model
+data = pd.read_csv("anomalous/elise_modified01.csv")
 
 
-# Initialize the population
-def init_population():
-    return [
-        np.random.randint(low=0, high=127, size=(SEQUENCE_LENGTH, 3))
-        for _ in range(POPULATION_SIZE)
-    ]
+# Your actual model should be used here
+model = load_model("model/model.h5")
 
-
-# Fitness function (the number of detected anomalies for each individual)
-def fitness(individual, model):
-    num_anomalies = predict_anomalies(model, individual)
-    return num_anomalies
-
-
-# Selection function (roulette wheel selection)
-def selection(population, fitnesses):
-    total_fitness = sum(fitnesses)
-    selected_idx = np.random.choice(
-        np.arange(len(population)), size=len(population), p=fitnesses / total_fitness
+# Your predict_anomalies function
+def predict_anomalies(model, df, sequence_length=500):
+    df = df[["note", "velocity", "time"]].copy()
+    scaler = MinMaxScaler()
+    df.loc[:, ["note", "velocity", "time"]] = scaler.fit_transform(
+        df[["note", "velocity", "time"]]
     )
-    return [population[i] for i in selected_idx]
+
+    if len(df) < sequence_length:
+        padding = pd.DataFrame(
+            np.zeros((sequence_length - len(df), 3)),
+            columns=["note", "velocity", "time"],
+        )
+        df = pd.concat([df, padding], ignore_index=True)
+
+    input_data = df.iloc[:sequence_length, :].values.reshape(1, sequence_length, -1)
+    predictions = model.predict(input_data)
+    predictions[predictions < 0] = 0
+    return int(np.round(np.sum(predictions)))
 
 
-# Crossover function (uniform crossover)
+# Genetic Algorithm Parameters
+population_size = 50
+generations = 100
+mutation_rate = 0.1
+elite_size = 5
+
+# Helper functions
+def create_individual():
+    individual = data.copy()
+    for col in individual.columns:
+        individual[col] = individual[col].apply(lambda x: x + random.randint(-10, 10))
+    return individual
+
+
+def create_population():
+    return [create_individual() for _ in range(population_size)]
+
+
+def fitness_function(individual):
+    return predict_anomalies(model, individual)
+
+
+def select_parents(population, fitnesses):
+    sorted_indices = np.argsort(fitnesses)
+    selected_parents = [population[i] for i in sorted_indices[:elite_size]]
+    return selected_parents
+
+
 def crossover(parent1, parent2):
-    child = np.copy(parent1)
-    for i in range(SEQUENCE_LENGTH):
-        for j in range(3):
-            if random.random() < 0.5:
-                child[i, j] = parent2[i, j]
+    child = parent1.copy()
+    crossover_point = random.randint(0, len(parent1))
+    for col in child.columns:
+        child[col].iloc[:crossover_point] = parent2[col].iloc[:crossover_point]
     return child
 
 
-# Mutation function (randomly change a note, velocity, or time value)
 def mutate(individual):
-    for i in range(SEQUENCE_LENGTH):
-        for j in range(3):
-            if random.random() < MUTATION_RATE:
-                individual[i, j] = np.random.randint(0, 127)
+    for col in individual.columns:
+        for i in range(len(individual)):
+            if random.random() < mutation_rate:
+                individual[col].iloc[i] += random.randint(-10, 10)
+    return individual
 
 
-# Main GA loop
-population = init_population()
+# Genetic Algorithm Loop
+population = create_population()
+best_fitness_so_far = float("inf")
 
-for generation in range(GENERATIONS):
-    # Evaluate the fitness of each individual
-    fitnesses = [fitness(individual, model) for individual in population]
+for generation in range(generations):
+    fitnesses = [fitness_function(individual) for individual in population]
 
-    # Sort the population by fitness (descending)
-    sorted_indices = np.argsort(fitnesses)[::-1]
-    population = [population[i] for i in sorted_indices]
-    fitnesses = [fitnesses[i] for i in sorted_indices]
+    current_best_fitness = min(fitnesses)
+    if current_best_fitness < best_fitness_so_far:
+        best_fitness_so_far = current_best_fitness
+        print(f"Generation {generation}: Best fitness so far: {best_fitness_so_far}")
 
-    # Elitism: keep the top individuals
-    num_elites = int(POPULATION_SIZE * ELITISM_RATE)
-    next_population = population[:num_elites]
+    parents = select_parents(population, fitnesses)
+    offspring = [
+        crossover(random.choice(parents), random.choice(parents))
+        for _ in range(population_size - elite_size)
+    ]
+    offspring = [mutate(child) for child in offspring]
+    population = parents + offspring
 
-    # Selection, crossover, and mutation
-    selected_population = selection(population, fitnesses)
-    while len(next_population) < POPULATION_SIZE:
-        parent1, parent2 = random.sample(selected_population, 2)
-        child = crossover(parent1, parent2)
-        mutate(child)
-        next_population.append(child)
+# Get the best solution
+best_solution = min(population, key=fitness_function)
+best_fitness = fitness_function(best_solution)
+best_solution.to_csv("best_solution.csv", index=False)
 
-    population = next_population
-
-    # Print the best individual's fitness
-    print(f"Generation {generation + 1}, Best fitness: {fitnesses[0]}")
-
-# The best individual
-best_individual = population[0]
+print("\nFinal best solution:", best_solution)
+print("Final best fitness:", best_fitness)
